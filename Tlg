@@ -1,0 +1,1302 @@
+-- // ============================================================
+-- // TLG HUB V2 - DELTA EDITION (V5 FIXED)
+-- // Bugs solucionados: BANG, Silent Aim, Hitbox Restore, Camera
+-- // ============================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local Stats = game:GetService("Stats")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+ScriptActive = true
+
+-- ============================================================
+-- CONFIG
+-- ============================================================
+local Config = {
+    -- ESFERA HITBOX
+    SphereHBEnabled = false,
+    SphereSize = 15,
+    SphereTransparency = 0.7,
+    SphereColor = Color3.fromRGB(255, 60, 0),
+    HeadModeEnabled = false,
+    KatanaFixEnabled = false,
+
+    -- HITBOX INVISIBLE
+    HitboxEnabled = false,
+    HitboxSize = 100000,
+
+    -- Silent Aim
+    SilentAimEnabled = false,
+    SilentAimTeamCheck = false,
+    SilentAimPrediction = false,
+    CircleVisible = true,
+    CircleSize = 120,
+
+    -- God Orb BANG (arreglado)
+    GodOrbBangEnabled = false,
+    BangOffset = 2.5,
+    BangDistance = 15,      -- solo bangea si está a menos de X studs
+    BangCooldown = 0.15,    -- tiempo entre bangs
+    BangAutoCamera = true,  -- la cámara sigue al enemigo
+    BangSmoothMode = true,  -- movimiento suave vs teleport instantáneo
+
+    -- Otros
+    SpeedEnabled = false, SpeedValue = 800,
+    FlyEnabled = false, FlySpeed = 200,
+    FastAttackEnabled = false,
+    ESPDistanceEnabled = false,
+    SafeAnchorEnabled = false,
+    AntiStunEnabled = false,
+    FPSBoosterEnabled = false,
+    AntiLagPROEnabled = false,
+    MultiJumpEnabled = false, MaxJumps = 18,
+    DashEnabled = true, DashPower = 150, DashUpPower = 20, DashCooldown = 0.8,
+    SelectedPlayer = nil,
+    ShowFPS = true, ShowPing = true,
+}
+
+local JumpsUsed = 0
+local LastDash = 0
+local LastAntiStunFix = 0
+local LastFuga = 0
+local LastBang = 0
+local FPSCounter = 0
+local LastFPSUpdate = 0
+local CurrentFPS = 0
+local BodyVelocity, BodyGyro = nil, nil
+local OriginalHRPProps = {}
+local OriginalAllProps = {}
+local AntiStunConfig = {BaseWalkSpeed=16, BaseJumpPower=50, BaseJumpHeight=7.2, UseJumpPower=true, JumpVelocityBoost=55}
+local AntiLagCache = {OriginalLighting=nil}
+
+local OrangeGlow = Color3.fromRGB(255, 120, 30)
+local SilverColor = Color3.fromRGB(220, 230, 245)
+local DarkSpaceBg = Color3.fromRGB(10, 12, 16)
+local FrameBg = Color3.fromRGB(18, 22, 28)
+local ElementBg = Color3.fromRGB(28, 34, 44)
+
+-- ============================================================
+-- UTILIDADES
+-- ============================================================
+local function Notify(t, x, d)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {Title=t, Text=x, Duration=d or 3})
+    end)
+end
+local function GetChar() return LocalPlayer.Character end
+local function GetHRP() local c = GetChar() return c and c:FindFirstChild("HumanoidRootPart") end
+local function GetHum() local c = GetChar() return c and c:FindFirstChildOfClass("Humanoid") end
+
+local function GetGuiParent()
+    local ok, hui = pcall(function() return gethui and gethui() end)
+    if ok and hui then return hui end
+    local ok2, cg = pcall(function() return CoreGui end)
+    if ok2 and cg then return cg end
+    return LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Distancia segura entre dos Vectors
+local function SafeDist(a, b)
+    if not a or not b then return math.huge end
+    return (a - b).Magnitude
+end
+
+-- ============================================================
+-- UI
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TLGHubV2DeltaV5"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+pcall(function() ScreenGui.Parent = GetGuiParent() end)
+if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- Botón dragón
+local OpenBtn = Instance.new("ImageButton", ScreenGui)
+OpenBtn.Size = UDim2.new(0, 55, 0, 55)
+OpenBtn.Position = UDim2.new(0.02, 0, 0.15, 0)
+OpenBtn.BackgroundColor3 = DarkSpaceBg
+OpenBtn.Image = "rbxassetid://1789089468535"
+OpenBtn.Active = true
+OpenBtn.Draggable = true
+Instance.new("UICorner", OpenBtn).CornerRadius = UDim.new(0, 10)
+local OBStroke = Instance.new("UIStroke", OpenBtn)
+OBStroke.Color = OrangeGlow
+OBStroke.Thickness = 2
+
+-- Botón Dash
+local DashBtn = Instance.new("TextButton", ScreenGui)
+DashBtn.Size = UDim2.new(0, 80, 0, 80)
+DashBtn.Position = UDim2.new(1, -100, 0.5, 60)
+DashBtn.BackgroundColor3 = OrangeGlow
+DashBtn.Text = "⚡"
+DashBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+DashBtn.TextSize = 32
+DashBtn.Font = Enum.Font.GothamBlack
+DashBtn.Active = true
+DashBtn.Draggable = true
+Instance.new("UICorner", DashBtn).CornerRadius = UDim.new(1, 0)
+local DBStroke = Instance.new("UIStroke", DashBtn)
+DBStroke.Color = Color3.fromRGB(255, 255, 255)
+DBStroke.Thickness = 3
+local DashCD = Instance.new("TextLabel", DashBtn)
+DashCD.Size = UDim2.new(1, 0, 1, 0)
+DashCD.BackgroundTransparency = 1
+DashCD.TextColor3 = Color3.fromRGB(255, 255, 255)
+DashCD.TextSize = 24
+DashCD.Font = Enum.Font.GothamBlack
+DashCD.TextStrokeTransparency = 0
+
+-- Círculo Silent Aim
+local AimCircle = Instance.new("Frame", ScreenGui)
+AimCircle.Size = UDim2.new(0, Config.CircleSize, 0, Config.CircleSize)
+AimCircle.Position = UDim2.new(0.5, -Config.CircleSize/2, 0.5, -Config.CircleSize/2)
+AimCircle.BackgroundTransparency = 1
+AimCircle.Active = true
+AimCircle.Draggable = true
+AimCircle.Visible = true
+AimCircle.ZIndex = 5
+
+local CircleRing = Instance.new("Frame", AimCircle)
+CircleRing.Size = UDim2.new(1, 0, 1, 0)
+CircleRing.BackgroundColor3 = OrangeGlow
+CircleRing.BackgroundTransparency = 0.85
+CircleRing.BorderSizePixel = 0
+Instance.new("UICorner", CircleRing).CornerRadius = UDim.new(1, 0)
+local CircleStroke = Instance.new("UIStroke", CircleRing)
+CircleStroke.Color = OrangeGlow
+CircleStroke.Thickness = 2
+CircleStroke.Transparency = 0.3
+
+local CrossH = Instance.new("Frame", AimCircle)
+CrossH.Size = UDim2.new(0, 20, 0, 2)
+CrossH.Position = UDim2.new(0.5, -10, 0.5, -1)
+CrossH.BackgroundColor3 = OrangeGlow
+CrossH.BorderSizePixel = 0
+CrossH.ZIndex = 6
+local CrossV = Instance.new("Frame", AimCircle)
+CrossV.Size = UDim2.new(0, 2, 0, 20)
+CrossV.Position = UDim2.new(0.5, -1, 0.5, -10)
+CrossV.BackgroundColor3 = OrangeGlow
+CrossV.BorderSizePixel = 0
+CrossV.ZIndex = 6
+
+local CircleLabel = Instance.new("TextLabel", AimCircle)
+CircleLabel.Size = UDim2.new(1, 0, 0, 16)
+CircleLabel.Position = UDim2.new(0, 0, 1, 2)
+CircleLabel.BackgroundTransparency = 1
+CircleLabel.Text = "SILENT AIM"
+CircleLabel.TextColor3 = OrangeGlow
+CircleLabel.TextSize = 10
+CircleLabel.Font = Enum.Font.GothamBold
+CircleLabel.TextStrokeTransparency = 0
+CircleLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+
+-- Tirador de redimensión
+local ResizeHandle = Instance.new("TextButton", AimCircle)
+ResizeHandle.Size = UDim2.new(0, 22, 0, 22)
+ResizeHandle.Position = UDim2.new(1, -14, 1, -14)
+ResizeHandle.BackgroundColor3 = OrangeGlow
+ResizeHandle.Text = "⤡"
+ResizeHandle.TextColor3 = Color3.fromRGB(255, 255, 255)
+ResizeHandle.TextSize = 16
+ResizeHandle.Font = Enum.Font.GothamBold
+ResizeHandle.ZIndex = 7
+Instance.new("UICorner", ResizeHandle).CornerRadius = UDim.new(0, 6)
+local RHStroke = Instance.new("UIStroke", ResizeHandle)
+RHStroke.Color = Color3.fromRGB(255, 255, 255)
+RHStroke.Thickness = 2
+
+-- Main Frame
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 620, 0, 340)
+MainFrame.Position = UDim2.new(0.5, -310, 0.5, -170)
+MainFrame.BackgroundColor3 = DarkSpaceBg
+MainFrame.Visible = false
+MainFrame.Active = true
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
+local MFStroke = Instance.new("UIStroke", MainFrame)
+MFStroke.Color = SilverColor
+MFStroke.Thickness = 1.5
+
+local Title = Instance.new("TextLabel", MainFrame)
+Title.Size = UDim2.new(1, -240, 0, 26)
+Title.Text = "🐉 TLG V2 [DELTA] V5 FIXED 🐉"
+Title.TextColor3 = SilverColor
+Title.TextSize = 12
+Title.Font = Enum.Font.GothamBold
+Title.BackgroundTransparency = 1
+
+local CloseBtn = Instance.new("TextButton", MainFrame)
+CloseBtn.Size = UDim2.new(0, 26, 0, 26)
+CloseBtn.Position = UDim2.new(1, -32, 0, 0)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 20)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize = 14
+CloseBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false end)
+
+-- Stats panel
+local StatsPanel = Instance.new("Frame", MainFrame)
+StatsPanel.Size = UDim2.new(0, 200, 0, 22)
+StatsPanel.Position = UDim2.new(1, -240, 0, 2)
+StatsPanel.BackgroundColor3 = Color3.fromRGB(22, 26, 34)
+Instance.new("UICorner", StatsPanel).CornerRadius = UDim.new(0, 6)
+local SPStroke = Instance.new("UIStroke", StatsPanel)
+SPStroke.Color = OrangeGlow
+SPStroke.Thickness = 1
+
+local FPSLabel = Instance.new("TextLabel", StatsPanel)
+FPSLabel.Size = UDim2.new(0.5, 0, 1, 0)
+FPSLabel.BackgroundTransparency = 1
+FPSLabel.Text = "FPS: --"
+FPSLabel.TextColor3 = Color3.fromRGB(60, 220, 100)
+FPSLabel.TextSize = 10
+FPSLabel.Font = Enum.Font.GothamBold
+
+local PingLabel = Instance.new("TextLabel", StatsPanel)
+PingLabel.Size = UDim2.new(0.5, 0, 1, 0)
+PingLabel.Position = UDim2.new(0.5, 0, 0, 0)
+PingLabel.BackgroundTransparency = 1
+PingLabel.Text = "Ping: --ms"
+PingLabel.TextColor3 = Color3.fromRGB(60, 220, 100)
+PingLabel.TextSize = 10
+PingLabel.Font = Enum.Font.GothamBold
+
+local ContentFrame = Instance.new("Frame", MainFrame)
+ContentFrame.Size = UDim2.new(0.98, 0, 0.88, 0)
+ContentFrame.Position = UDim2.new(0.01, 0, 0.1, 0)
+ContentFrame.BackgroundTransparency = 1
+
+local function CreateColumn(posX, width, titleText)
+    local colFrame = Instance.new("Frame", ContentFrame)
+    colFrame.Size = UDim2.new(width, -4, 1, 0)
+    colFrame.Position = UDim2.new(posX, 0, 0, 0)
+    colFrame.BackgroundColor3 = FrameBg
+    Instance.new("UICorner", colFrame).CornerRadius = UDim.new(0, 6)
+    local colStroke = Instance.new("UIStroke", colFrame)
+    colStroke.Color = Color3.fromRGB(45, 55, 70)
+    colStroke.Thickness = 1
+    local colTitle = Instance.new("TextLabel", colFrame)
+    colTitle.Size = UDim2.new(1, 0, 0, 20)
+    colTitle.Text = titleText
+    colTitle.TextColor3 = SilverColor
+    colTitle.TextSize = 9
+    colTitle.Font = Enum.Font.GothamBold
+    colTitle.BackgroundTransparency = 1
+    local scroll = Instance.new("ScrollingFrame", colFrame)
+    scroll.Size = UDim2.new(0.94, 0, 0.88, 0)
+    scroll.Position = UDim2.new(0.03, 0, 0.1, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 3
+    scroll.ScrollBarImageColor3 = OrangeGlow
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    local list = Instance.new("UIListLayout", scroll)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding = UDim.new(0, 4)
+    return scroll
+end
+
+local Col1 = CreateColumn(0, 0.25, "📜 JUGADORES")
+local Col2 = CreateColumn(0.25, 0.25, "🎯 ESFERA HITBOX")
+local Col3 = CreateColumn(0.50, 0.25, "⚡ BANG & AIM")
+local Col4 = CreateColumn(0.75, 0.25, "🛡️ FLY & DEFENSA")
+
+-- ============================================================
+-- CREADORES UI
+-- ============================================================
+local function CreateToggle(text, parent, callback, initial)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.98, 0, 0, 22)
+    btn.BackgroundColor3 = ElementBg
+    btn.Text = ((initial and "🟢 ") or "🔴 ") .. text
+    btn.TextColor3 = initial and OrangeGlow or Color3.fromRGB(200, 210, 220)
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 8
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Color = initial and OrangeGlow or Color3.fromRGB(50, 60, 75)
+    local enabled = initial or false
+    btn.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        btn.Text = (enabled and "🟢 " or "🔴 ") .. text
+        btn.TextColor3 = enabled and OrangeGlow or Color3.fromRGB(200, 210, 220)
+        stroke.Color = enabled and OrangeGlow or Color3.fromRGB(50, 60, 75)
+        callback(enabled)
+    end)
+    if initial then callback(true) end
+    return btn
+end
+
+local function CreateActionBtn(text, parent, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.98, 0, 0, 24)
+    btn.BackgroundColor3 = Color3.fromRGB(180, 40, 20)
+    btn.Text = "🚀 " .. text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 8
+    btn.Parent = parent
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    btn.MouseButton1Click:Connect(function() callback() end)
+    return btn
+end
+
+local function CreateSlider(text, min, max, default, parent, callback)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(0.98, 0, 0, 30)
+    frame.BackgroundColor3 = ElementBg
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 4)
+    local label = Instance.new("TextLabel", frame)
+    label.Size = UDim2.new(1, 0, 0, 12)
+    label.Text = text .. ": " .. tostring(default)
+    label.TextColor3 = SilverColor
+    label.TextSize = 7.5
+    label.Font = Enum.Font.GothamBold
+    label.BackgroundTransparency = 1
+    local bar = Instance.new("TextButton", frame)
+    bar.Size = UDim2.new(0.9, 0, 0, 6)
+    bar.Position = UDim2.new(0.05, 0, 0.6, 0)
+    bar.BackgroundColor3 = DarkSpaceBg
+    bar.Text = ""
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+    local fill = Instance.new("Frame", bar)
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = OrangeGlow
+    fill.BorderSizePixel = 0
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    local dragging = false
+    local function Update(input)
+        local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+        fill.Size = UDim2.new(pos, 0, 1, 0)
+        local value = math.floor((min + (max - min) * pos) * 100) / 100
+        label.Text = text .. ": " .. tostring(value)
+        callback(value)
+    end
+    bar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; Update(input)
+        end
+    end)
+    bar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            Update(input)
+        end
+    end)
+    return function(nv)
+        local c = math.clamp(nv, min, max)
+        fill.Size = UDim2.new((c - min) / (max - min), 0, 1, 0)
+        label.Text = text .. ": " .. tostring(c)
+    end
+end
+
+-- ============================================================
+-- COLUMNA 1: JUGADORES
+-- ============================================================
+local TargetLabel = Instance.new("TextLabel", Col1)
+TargetLabel.Size = UDim2.new(1, 0, 0, 14)
+TargetLabel.Text = "Target: Auto"
+TargetLabel.TextColor3 = SilverColor
+TargetLabel.TextSize = 8
+TargetLabel.Font = Enum.Font.GothamBold
+TargetLabel.BackgroundTransparency = 1
+
+local PList = Instance.new("Frame", Col1)
+PList.Size = UDim2.new(1, 0, 0, 200)
+PList.BackgroundTransparency = 1
+Instance.new("UIListLayout", PList).Padding = UDim.new(0, 2)
+
+local PlayerButtons = {} -- refs para limpiar
+
+local function RefreshPlayers()
+    for _, c in pairs(PList:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    PlayerButtons = {}
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local b = Instance.new("TextButton", PList)
+            b.Size = UDim2.new(0.98, 0, 0, 18)
+            b.BackgroundColor3 = ElementBg
+            b.Text = "👤 " .. p.DisplayName
+            b.TextColor3 = Color3.fromRGB(200, 210, 220)
+            b.TextSize = 7.5
+            b.Font = Enum.Font.Gotham
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 3)
+            b.MouseButton1Click:Connect(function()
+                if not p or not p.Parent then return end
+                Config.SelectedPlayer = p.Name
+                TargetLabel.Text = "Target: " .. p.DisplayName
+                Notify("Target", p.DisplayName, 2)
+            end)
+            PlayerButtons[p] = b
+        end
+    end
+end
+Players.PlayerAdded:Connect(function(p)
+    task.wait(0.5)
+    RefreshPlayers()
+end)
+Players.PlayerRemoving:Connect(function(p)
+    -- Limpieza completa de referencias
+    if Config.SelectedPlayer == p.Name then
+        Config.SelectedPlayer = nil
+        TargetLabel.Text = "Target: Auto"
+    end
+    PlayerButtons[p] = nil
+    OriginalHRPProps[p] = nil
+    OriginalAllProps[p] = nil
+    RefreshPlayers()
+end)
+RefreshPlayers()
+
+-- ============================================================
+-- COLUMNA 2: ESFERA HITBOX
+-- ============================================================
+local SphereTitle = Instance.new("TextLabel", Col2)
+SphereTitle.Size = UDim2.new(0.98, 0, 0, 16)
+SphereTitle.Text = "🔴 ESFERA HITBOX"
+SphereTitle.TextColor3 = OrangeGlow
+SphereTitle.TextSize = 9
+SphereTitle.Font = Enum.Font.GothamBold
+SphereTitle.BackgroundTransparency = 1
+
+CreateToggle("Activar Esfera Hitbox", Col2, function(v) Config.SphereHBEnabled = v end)
+CreateToggle("Modo Cabeza (Head)", Col2, function(v) Config.HeadModeEnabled = v end)
+CreateToggle("⚔️ Katana/Gold → Cabeza", Col2, function(v) Config.KatanaFixEnabled = v end)
+
+-- Display tamaño
+local SizeDisplay = Instance.new("TextLabel", Col2)
+SizeDisplay.Size = UDim2.new(0.98, 0, 0, 22)
+SizeDisplay.BackgroundColor3 = Color3.fromRGB(40, 46, 58)
+SizeDisplay.Text = "📏 Tamaño: " .. Config.SphereSize
+SizeDisplay.TextColor3 = OrangeGlow
+SizeDisplay.TextSize = 11
+SizeDisplay.Font = Enum.Font.GothamBold
+Instance.new("UICorner", SizeDisplay).CornerRadius = UDim.new(0, 4)
+local SDBorder = Instance.new("UIStroke", SizeDisplay)
+SDBorder.Color = OrangeGlow
+SDBorder.Thickness = 1
+
+-- Botones +1 / -1
+local ButtonRow = Instance.new("Frame", Col2)
+ButtonRow.Size = UDim2.new(0.98, 0, 0, 34)
+ButtonRow.BackgroundColor3 = ElementBg
+Instance.new("UICorner", ButtonRow).CornerRadius = UDim.new(0, 5)
+
+local Minus1Btn = Instance.new("TextButton", ButtonRow)
+Minus1Btn.Size = UDim2.new(0.48, 0, 1, 0)
+Minus1Btn.BackgroundColor3 = Color3.fromRGB(180, 40, 20)
+Minus1Btn.Text = "➖ 1"
+Minus1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Minus1Btn.Font = Enum.Font.GothamBlack
+Minus1Btn.TextSize = 15
+Instance.new("UICorner", Minus1Btn).CornerRadius = UDim.new(0, 5)
+
+local Plus1Btn = Instance.new("TextButton", ButtonRow)
+Plus1Btn.Size = UDim2.new(0.48, 0, 1, 0)
+Plus1Btn.Position = UDim2.new(0.52, 0, 0, 0)
+Plus1Btn.BackgroundColor3 = Color3.fromRGB(40, 140, 60)
+Plus1Btn.Text = "➕ 1"
+Plus1Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Plus1Btn.Font = Enum.Font.GothamBlack
+Plus1Btn.TextSize = 15
+Instance.new("UICorner", Plus1Btn).CornerRadius = UDim.new(0, 5)
+
+-- Botones +10 / -10
+local BigRow = Instance.new("Frame", Col2)
+BigRow.Size = UDim2.new(0.98, 0, 0, 24)
+BigRow.BackgroundTransparency = 1
+
+local Minus10Btn = Instance.new("TextButton", BigRow)
+Minus10Btn.Size = UDim2.new(0.48, 0, 1, 0)
+Minus10Btn.BackgroundColor3 = Color3.fromRGB(120, 30, 15)
+Minus10Btn.Text = "➖ 10"
+Minus10Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Minus10Btn.Font = Enum.Font.GothamBold
+Minus10Btn.TextSize = 10
+Instance.new("UICorner", Minus10Btn).CornerRadius = UDim.new(0, 4)
+
+local Plus10Btn = Instance.new("TextButton", BigRow)
+Plus10Btn.Size = UDim2.new(0.48, 0, 1, 0)
+Plus10Btn.Position = UDim2.new(0.52, 0, 0, 0)
+Plus10Btn.BackgroundColor3 = Color3.fromRGB(25, 100, 45)
+Plus10Btn.Text = "➕ 10"
+Plus10Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Plus10Btn.Font = Enum.Font.GothamBold
+Plus10Btn.TextSize = 10
+Instance.new("UICorner", Plus10Btn).CornerRadius = UDim.new(0, 4)
+
+local ResetSizeBtn = Instance.new("TextButton", Col2)
+ResetSizeBtn.Size = UDim2.new(0.98, 0, 0, 20)
+ResetSizeBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+ResetSizeBtn.Text = "🔄 Resetear a 15"
+ResetSizeBtn.TextColor3 = SilverColor
+ResetSizeBtn.Font = Enum.Font.GothamBold
+ResetSizeBtn.TextSize = 9
+Instance.new("UICorner", ResetSizeBtn).CornerRadius = UDim.new(0, 4)
+
+local function UpdateSizeDisplay()
+    SizeDisplay.Text = "📏 Tamaño: " .. Config.SphereSize
+end
+
+Minus1Btn.MouseButton1Click:Connect(function()
+    Config.SphereSize = math.clamp(Config.SphereSize - 1, 1, 500)
+    UpdateSizeDisplay()
+end)
+Plus1Btn.MouseButton1Click:Connect(function()
+    Config.SphereSize = math.clamp(Config.SphereSize + 1, 1, 500)
+    UpdateSizeDisplay()
+end)
+Minus10Btn.MouseButton1Click:Connect(function()
+    Config.SphereSize = math.clamp(Config.SphereSize - 10, 1, 500)
+    UpdateSizeDisplay()
+end)
+Plus10Btn.MouseButton1Click:Connect(function()
+    Config.SphereSize = math.clamp(Config.SphereSize + 10, 1, 500)
+    UpdateSizeDisplay()
+end)
+ResetSizeBtn.MouseButton1Click:Connect(function()
+    Config.SphereSize = 15
+    UpdateSizeDisplay()
+end)
+
+-- Feedback visual
+local function AnimatePress(btn)
+    local orig = btn.BackgroundColor3
+    btn.BackgroundColor3 = Color3.fromRGB(255, 255, 100)
+    task.delay(0.1, function()
+        if btn and btn.Parent then btn.BackgroundColor3 = orig end
+    end)
+end
+Minus1Btn.MouseButton1Down:Connect(function() AnimatePress(Minus1Btn) end)
+Plus1Btn.MouseButton1Down:Connect(function() AnimatePress(Plus1Btn) end)
+Minus10Btn.MouseButton1Down:Connect(function() AnimatePress(Minus10Btn) end)
+Plus10Btn.MouseButton1Down:Connect(function() AnimatePress(Plus10Btn) end)
+
+-- Colores
+local ColorLabel = Instance.new("TextLabel", Col2)
+ColorLabel.Size = UDim2.new(0.98, 0, 0, 14)
+ColorLabel.Text = "🎨 Color:"
+ColorLabel.TextColor3 = SilverColor
+ColorLabel.TextSize = 9
+ColorLabel.Font = Enum.Font.GothamBold
+ColorLabel.BackgroundTransparency = 1
+
+local ColorRow = Instance.new("Frame", Col2)
+ColorRow.Size = UDim2.new(0.98, 0, 0, 26)
+ColorRow.BackgroundTransparency = 1
+local ColorLayout = Instance.new("UIListLayout", ColorRow)
+ColorLayout.FillDirection = Enum.FillDirection.Horizontal
+ColorLayout.Padding = UDim.new(0, 4)
+
+for _, opt in ipairs({
+    Color3.fromRGB(255, 60, 0), Color3.fromRGB(60, 220, 100),
+    Color3.fromRGB(60, 130, 255), Color3.fromRGB(180, 60, 255),
+    Color3.fromRGB(255, 255, 255), Color3.fromRGB(255, 215, 0),
+}) do
+    local btn = Instance.new("TextButton", ColorRow)
+    btn.Size = UDim2.new(0, 30, 1, 0)
+    btn.BackgroundColor3 = opt
+    btn.Text = ""
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    btn.MouseButton1Click:Connect(function() Config.SphereColor = opt end)
+end
+
+CreateSlider("Transparencia x100", 0, 100, 70, Col2, function(v)
+    Config.SphereTransparency = 1 - (v / 100)
+end)
+
+local HBTitle = Instance.new("TextLabel", Col2)
+HBTitle.Size = UDim2.new(0.98, 0, 0, 14)
+HBTitle.Text = "── 📦 HITBOX INVISIBLE ──"
+HBTitle.TextColor3 = OrangeGlow
+HBTitle.TextSize = 8
+HBTitle.Font = Enum.Font.GothamBold
+HBTitle.BackgroundTransparency = 1
+
+CreateToggle("Hitbox 100k (Invisible)", Col2, function(v)
+    Config.HitboxEnabled = v
+    Config.HitboxSize = 100000
+end)
+
+-- ============================================================
+-- COLUMNA 3: BANG & SILENT AIM (ARREGLADO)
+-- ============================================================
+local BangTitle = Instance.new("TextLabel", Col3)
+BangTitle.Size = UDim2.new(0.98, 0, 0, 16)
+BangTitle.Text = "💥 GOD ORB BANG"
+BangTitle.TextColor3 = OrangeGlow
+BangTitle.TextSize = 9
+BangTitle.Font = Enum.Font.GothamBold
+BangTitle.BackgroundTransparency = 1
+
+CreateToggle("💥 BANG activado", Col3, function(v) Config.GodOrbBangEnabled = v end)
+CreateToggle("🎥 Auto-Cámara", Col3, function(v) Config.BangAutoCamera = v end, true)
+CreateToggle("🌊 Modo Suave", Col3, function(v) Config.BangSmoothMode = v end, true)
+CreateSlider("Distancia (studs)", 3, 50, 15, Col3, function(v) Config.BangDistance = v end)
+CreateSlider("Cooldown x100", 5, 100, 15, Col3, function(v) Config.BangCooldown = v / 100 end)
+CreateSlider("Offset detrás", 0, 10, 2.5, Col3, function(v) Config.BangOffset = v end)
+
+-- Separador Silent Aim
+local Divider = Instance.new("TextLabel", Col3)
+Divider.Size = UDim2.new(0.98, 0, 0, 14)
+Divider.Text = "── 🎯 SILENT AIM ──"
+Divider.TextColor3 = OrangeGlow
+Divider.TextSize = 8
+Divider.Font = Enum.Font.GothamBold
+Divider.BackgroundTransparency = 1
+
+CreateToggle("🎯 Silent Aim ON", Col3, function(v) Config.SilentAimEnabled = v end)
+CreateToggle("👁️ Mostrar Círculo", Col3, function(v)
+    Config.CircleVisible = v
+    AimCircle.Visible = v
+end, true)
+CreateToggle("👤 Team Check", Col3, function(v) Config.SilentAimTeamCheck = v end)
+CreateToggle("🔮 Predicción", Col3, function(v) Config.SilentAimPrediction = v end)
+
+local UpdateCircleSlider = CreateSlider("Círculo Tamaño", 60, 400, Config.CircleSize, Col3, function(v)
+    Config.CircleSize = v
+    AimCircle.Size = UDim2.new(0, v, 0, v)
+    AimCircle.Position = UDim2.new(0.5, -v/2, 0.5, -v/2)
+end)
+
+local AtkDivider = Instance.new("TextLabel", Col3)
+AtkDivider.Size = UDim2.new(0.98, 0, 0, 14)
+AtkDivider.Text = "── ⚡ ATTACK ──"
+AtkDivider.TextColor3 = OrangeGlow
+AtkDivider.TextSize = 8
+AtkDivider.Font = Enum.Font.GothamBold
+AtkDivider.BackgroundTransparency = 1
+
+CreateToggle("Fast Attack", Col3, function(v) Config.FastAttackEnabled = v end)
+CreateToggle("Speed 800", Col3, function(v) Config.SpeedEnabled = v end)
+CreateToggle("ESP Nombre+Dist", Col3, function(v) Config.ESPDistanceEnabled = v end)
+CreateToggle("FPS Booster", Col3, function(v)
+    Config.FPSBoosterEnabled = v
+    if v then
+        pcall(function()
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 9e9
+        end)
+    end
+end)
+CreateToggle("🔥 Anti-Lag PRO", Col3, function(v)
+    Config.AntiLagPROEnabled = v
+    if v then EnableAntiLagPRO() else DisableAntiLagPRO() end
+end)
+
+-- ============================================================
+-- COLUMNA 4: FLY & DEFENSA
+-- ============================================================
+CreateToggle("Fly Ultra Free", Col4, function(v)
+    Config.FlyEnabled = v
+    if not v then
+        if BodyVelocity then BodyVelocity:Destroy() BodyVelocity = nil end
+        if BodyGyro then BodyGyro:Destroy() BodyGyro = nil end
+    end
+end)
+CreateSlider("Velocidad Fly", 50, 60000, 200, Col4, function(v) Config.FlySpeed = v end)
+CreateActionBtn("FUGA (10,000m ⬆️)", Col4, function() PerformFuga(10000) end)
+CreateToggle("Auto Fuga (15% HP)", Col4, function(v) Config.SafeAnchorEnabled = v end)
+CreateToggle("Anti-Stun v3", Col4, function(v) Config.AntiStunEnabled = v end)
+CreateToggle("🔥 18 Saltos", Col4, function(v)
+    Config.MultiJumpEnabled = v; JumpsUsed = 0
+end)
+CreateSlider("Cantidad Saltos", 1, 50, 18, Col4, function(v) Config.MaxJumps = v end)
+
+-- ============================================================
+-- FUNCIONES
+-- ============================================================
+function PerformFuga(h)
+    if tick() - LastFuga < 0.5 then return end
+    LastFuga = tick()
+    local hrp, hum = GetHRP(), GetHum()
+    if not hrp or not hum then return end
+    pcall(function()
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        if hrp.Anchored then hrp.Anchored = false end
+        local cf = hrp.CFrame
+        hrp.CFrame = CFrame.new(cf.Position + Vector3.new(0, h or 10000, 0)) * (cf - cf.Position)
+        task.wait()
+        if hrp and hrp.Parent then
+            hrp.AssemblyLinearVelocity = Vector3.zero
+            hum:ChangeState(Enum.HumanoidStateType.Freefall)
+        end
+        if Camera then
+            Camera.CFrame = hrp.CFrame * CFrame.new(0, 2, 8)
+        end
+    end)
+end
+
+function PerformDash()
+    if not Config.DashEnabled then return end
+    if tick() - LastDash < Config.DashCooldown then return end
+    LastDash = tick()
+    local hrp, hum = GetHRP(), GetHum()
+    if not hrp or not hum then return end
+    pcall(function()
+        local dir = Camera.CFrame.LookVector
+        local flat = Vector3.new(dir.X, 0, dir.Z)
+        if flat.Magnitude < 0.1 then flat = Vector3.new(0, 0, -1) end
+        flat = flat.Unit
+        hrp.AssemblyLinearVelocity = Vector3.new(flat.X * Config.DashPower, Config.DashUpPower, flat.Z * Config.DashPower)
+    end)
+end
+
+local function RestoreStates(hum)
+    pcall(function()
+        for _, st in ipairs({Enum.HumanoidStateType.Jumping, Enum.HumanoidStateType.Freefall, Enum.HumanoidStateType.Landed, Enum.HumanoidStateType.Running, Enum.HumanoidStateType.RunningNoPhysics}) do
+            hum:SetStateEnabled(st, true)
+        end
+        for _, st in ipairs({Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Physics, Enum.HumanoidStateType.PlatformStanding}) do
+            hum:SetStateEnabled(st, false)
+        end
+    end)
+end
+
+function EnableAntiLagPRO()
+    pcall(function()
+        AntiLagCache.OriginalLighting = {
+            GlobalShadows=Lighting.GlobalShadows, FogEnd=Lighting.FogEnd,
+            FogStart=Lighting.FogStart, Brightness=Lighting.Brightness,
+        }
+        Lighting.GlobalShadows = false
+        Lighting.FogEnd = 1e6; Lighting.FogStart = 1e6
+        Lighting.Brightness = 1
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("PostEffect") or e:IsA("Atmosphere") then e.Enabled = false end
+        end
+    end)
+end
+function DisableAntiLagPRO()
+    pcall(function()
+        if AntiLagCache.OriginalLighting then
+            for k, v in pairs(AntiLagCache.OriginalLighting) do Lighting[k] = v end
+        end
+    end)
+end
+
+-- ============================================================
+-- HITBOX ESFERA (con restauración ROBUSTA)
+-- ============================================================
+local function SaveOriginalProps(p)
+    if not p.Character then return end
+    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+    local head = p.Character:FindFirstChild("Head")
+    if hrp and head and not OriginalAllProps[p] then
+        OriginalAllProps[p] = {
+            HRP_Size = hrp.Size, HRP_Shape = hrp.Shape, HRP_Transparency = hrp.Transparency, HRP_CanCollide = hrp.CanCollide, HRP_Color = hrp.Color,
+            Head_Size = head.Size, Head_Shape = head.Shape, Head_Transparency = head.Transparency, Head_CanCollide = head.CanCollide, Head_Massless = head.Massless, Head_Color = head.Color,
+        }
+    end
+end
+
+local function RestoreProps(p)
+    if not p or not p.Character then
+        OriginalAllProps[p] = nil
+        return
+    end
+    local o = OriginalAllProps[p]
+    if not o then return end
+    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+    local head = p.Character:FindFirstChild("Head")
+    pcall(function()
+        if hrp then
+            hrp.Size = o.HRP_Size
+            hrp.Shape = o.HRP_Shape
+            hrp.Transparency = o.HRP_Transparency
+            hrp.CanCollide = o.HRP_CanCollide
+            hrp.Color = o.HRP_Color
+        end
+        if head then
+            head.Size = o.Head_Size
+            head.Shape = o.Head_Shape
+            head.Transparency = o.Head_Transparency
+            head.CanCollide = o.Head_CanCollide
+            head.Massless = o.Head_Massless
+            head.Color = o.Head_Color
+        end
+    end)
+    OriginalAllProps[p] = nil
+end
+
+local function ApplySphereHitbox(p)
+    if p == LocalPlayer then return end
+    if not p or not p.Parent then return end
+    if not p.Character then return end
+    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+    local head = p.Character:FindFirstChild("Head")
+    if not hrp or not head then return end
+
+    SaveOriginalProps(p)
+    local o = OriginalAllProps[p]
+
+    pcall(function()
+        if Config.KatanaFixEnabled or Config.HeadModeEnabled then
+            head.Shape = Enum.PartType.Ball
+            head.Size = Vector3.new(Config.SphereSize, Config.SphereSize, Config.SphereSize)
+            head.Color = Config.SphereColor
+            head.Transparency = Config.SphereTransparency
+            head.CanCollide = false
+            head.Massless = true
+            if o then
+                hrp.Size = o.HRP_Size
+                hrp.Shape = o.HRP_Shape
+                hrp.Transparency = o.HRP_Transparency
+                hrp.CanCollide = o.HRP_CanCollide
+            end
+        else
+            hrp.Shape = Enum.PartType.Ball
+            hrp.Size = Vector3.new(Config.SphereSize, Config.SphereSize, Config.SphereSize)
+            hrp.Color = Config.SphereColor
+            hrp.Transparency = Config.SphereTransparency
+            hrp.CanCollide = false
+            if o then
+                head.Size = o.Head_Size
+                head.Shape = o.Head_Shape
+                head.Transparency = o.Head_Transparency
+                head.CanCollide = o.Head_CanCollide
+                head.Massless = o.Head_Massless
+            end
+        end
+    end)
+end
+
+local function ClearAllHitboxes()
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            RestoreProps(p)
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    p.CharacterAdded:Connect(function()
+        task.wait(0.3)
+        if Config.SphereHBEnabled then ApplySphereHitbox(p) end
+    end)
+end)
+
+-- ============================================================
+-- ✅ GOD ORB BANG - VERSIÓN ARREGLADA (sin lag)
+-- ============================================================
+local function PerformBang()
+    if not Config.GodOrbBangEnabled then return end
+    if tick() - LastBang < Config.BangCooldown then return end
+
+    -- Verificar que hay target
+    local target = nil
+    if Config.SelectedPlayer then
+        target = Players:FindFirstChild(Config.SelectedPlayer)
+    else
+        -- Auto: buscar el más cercano
+        local myHrp = GetHRP()
+        if myHrp then
+            local closest, minDist = nil, Config.BangDistance
+            for _, p in pairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer and p.Character then
+                    local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                    local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                    if hrp and hum and hum.Health > 0 then
+                        local d = SafeDist(myHrp.Position, hrp.Position)
+                        if d < minDist then
+                            closest, minDist = p, d
+                        end
+                    end
+                end
+            end
+            target = closest
+        end
+    end
+
+    if not target or not target.Character then return end
+    local tHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    if not tHRP then return end
+
+    local myHRP = GetHRP()
+    local hum = GetHum()
+    if not myHRP or not hum then return end
+
+    -- Verificar distancia (solo bangear si está dentro del rango)
+    local distance = SafeDist(myHRP.Position, tHRP.Position)
+    if distance > Config.BangDistance then return end
+
+    LastBang = tick()
+
+    pcall(function()
+        -- 1) Resetear velocidades ANTES del teleport (evita rubber-band)
+        myHRP.AssemblyLinearVelocity = Vector3.zero
+        myHRP.AssemblyAngularVelocity = Vector3.zero
+
+        -- 2) Calcular posición: detrás del enemigo mirándolo
+        local targetCF = tHRP.CFrame
+        local behindCF = targetCF * CFrame.new(0, 0, Config.BangOffset)
+
+        -- 3) Teleport (suave o instantáneo)
+        if Config.BangSmoothMode then
+            -- Lerp para movimiento suave
+            myHRP.CFrame = myHRP.CFrame:Lerp(behindCF, 0.6)
+        else
+            myHRP.CFrame = behindCF
+        end
+
+        -- 4) Resetear velocidades DESPUÉS (evita inercia residual)
+        myHRP.AssemblyLinearVelocity = Vector3.zero
+        myHRP.AssemblyAngularVelocity = Vector3.zero
+
+        -- 5) Auto-cámara: sigue al enemigo suavemente
+        if Config.BangAutoCamera and Camera then
+            local desiredCF = CFrame.new(behindCF.Position + Vector3.new(0, 4, 8), tHRP.Position)
+            Camera.CFrame = Camera.CFrame:Lerp(desiredCF, 0.15)
+        end
+
+        -- 6) Forzar al Humanoid a estado Running para no quedar bloqueado
+        hum:ChangeState(Enum.HumanoidStateType.Running)
+    end)
+end
+
+-- ============================================================
+-- SILENT AIM
+-- ============================================================
+local function GetTargetInCircle()
+    local ok, circleCenter = pcall(function()
+        return AimCircle.AbsolutePosition + AimCircle.AbsoluteSize / 2
+    end)
+    if not ok then return nil end
+    local radius = AimCircle.AbsoluteSize.X / 2
+    local bestTarget, bestDist = nil, math.huge
+
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            if Config.SilentAimTeamCheck and p.Team == LocalPlayer.Team then continue end
+            local head = p.Character:FindFirstChild("Head")
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if head and hum and hum.Health > 0 then
+                local pos = head.Position
+                if Config.SilentAimPrediction then
+                    pos = pos + head.AssemblyLinearVelocity * 0.12
+                end
+                local screenPos, onScreen = Camera:WorldToViewportPoint(pos)
+                if onScreen then
+                    local sp = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (sp - circleCenter).Magnitude
+                    if dist <= radius and dist < bestDist then
+                        bestTarget, bestDist = p, dist
+                    end
+                end
+            end
+        end
+    end
+    return bestTarget
+end
+
+-- Hook seguro
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if Config.SilentAimEnabled and key == "Hit" then
+        local ok, target = pcall(GetTargetInCircle)
+        if ok and target and target.Character then
+            local head = target.Character:FindFirstChild("Head")
+            if head then
+                return head.CFrame
+            end
+        end
+    end
+    return oldIndex(self, key)
+end)
+
+-- Tirador del círculo (input exclusivo)
+local resizeDragging = false
+local resizeStartInput = nil
+local resizeStartSize = 0
+
+ResizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        resizeDragging = true
+        resizeStartInput = input.Position
+        resizeStartSize = AimCircle.AbsoluteSize.X
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if resizeDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - resizeStartInput
+        local diagonalDelta = (delta.X + delta.Y) / 2
+        local newSize = math.clamp(resizeStartSize + diagonalDelta * 2, 60, 600)
+        Config.CircleSize = newSize
+        AimCircle.Size = UDim2.new(0, newSize, 0, newSize)
+        AimCircle.Position = UDim2.new(0.5, -newSize/2, 0.5, -newSize/2)
+        if UpdateCircleSlider then UpdateCircleSlider(newSize) end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        resizeDragging = false
+    end
+end)
+
+-- ============================================================
+-- LOOP PRINCIPAL
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if not ScriptActive then return end
+
+    -- Esfera hitbox
+    if Config.SphereHBEnabled then
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                ApplySphereHitbox(p)
+            end
+        end
+    elseif next(OriginalAllProps) ~= nil then
+        ClearAllHitboxes()
+    end
+
+    -- Hitbox 100k
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = p.Character.HumanoidRootPart
+            if Config.HitboxEnabled and not Config.SphereHBEnabled then
+                if not OriginalHRPProps[p] then
+                    OriginalHRPProps[p] = {Size = hrp.Size, Shape = hrp.Shape}
+                end
+                hrp.Shape = Enum.PartType.Block
+                hrp.Size = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
+                hrp.Transparency = 1
+                hrp.CanCollide = false
+            elseif OriginalHRPProps[p] and not Config.SphereHBEnabled then
+                hrp.Size = OriginalHRPProps[p].Size
+                hrp.Shape = OriginalHRPProps[p].Shape
+                hrp.Transparency = 0
+                hrp.CanCollide = true
+                OriginalHRPProps[p] = nil
+            end
+        end
+    end
+
+    -- ✅ BANG (llamada al método arreglado)
+    if Config.GodOrbBangEnabled then
+        PerformBang()
+    end
+
+    -- Multi-jump
+    if Config.MultiJumpEnabled then
+        local h = GetHum()
+        if h and h.FloorMaterial ~= Enum.Material.Air then JumpsUsed = 0 end
+    end
+
+    -- ESP
+    if Config.ESPDistanceEnabled and GetHRP() then
+        local myHrp = GetHRP()
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Head") then
+                pcall(function()
+                    local head = p.Character.Head
+                    local hrp2 = p.Character:FindFirstChild("HumanoidRootPart")
+                    local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                    if hrp2 then
+                        local dist = math.floor((myHrp.Position - hrp2.Position).Magnitude)
+                        if not head:FindFirstChild("TLG_ESP") then
+                            local bg = Instance.new("BillboardGui", head)
+                            bg.Name = "TLG_ESP"
+                            bg.Size = UDim2.new(0, 200, 0, 40)
+                            bg.StudsOffset = Vector3.new(0, 3, 0)
+                            bg.AlwaysOnTop = true
+                            local lbl = Instance.new("TextLabel", bg)
+                            lbl.Name = "L"
+                            lbl.Size = UDim2.new(1, 0, 1, 0)
+                            lbl.BackgroundTransparency = 1
+                            lbl.TextColor3 = OrangeGlow
+                            lbl.TextSize = 12
+                            lbl.Font = Enum.Font.GothamBold
+                            lbl.TextStrokeTransparency = 0
+                        end
+                        local hp = hum and math.floor(hum.Health) or 0
+                        head.TLG_ESP.L.Text = p.DisplayName .. "\n[" .. dist .. "m] " .. hp .. "HP"
+                    end
+                end)
+            elseif p.Character and p.Character:FindFirstChild("Head") and p.Character.Head:FindFirstChild("TLG_ESP") then
+                p.Character.Head.TLG_ESP:Destroy()
+            end
+        end
+    else
+        for _, p in pairs(Players:GetPlayers()) do
+            if p.Character and p.Character:FindFirstChild("Head") and p.Character.Head:FindFirstChild("TLG_ESP") then
+                p.Character.Head.TLG_ESP:Destroy()
+            end
+        end
+    end
+
+    -- Speed
+    local hum = GetHum()
+    if hum and Config.SpeedEnabled then hum.WalkSpeed = Config.SpeedValue end
+
+    -- Fly
+    if Config.FlyEnabled and GetHRP() then
+        pcall(function()
+            local hrp = GetHRP()
+            if not BodyVelocity or not BodyVelocity.Parent then
+                BodyVelocity = Instance.new("BodyVelocity", hrp)
+                BodyVelocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            end
+            if not BodyGyro or not BodyGyro.Parent then
+                BodyGyro = Instance.new("BodyGyro", hrp)
+                BodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+            end
+            local md = hum.MoveDirection
+            BodyVelocity.Velocity = (md.Magnitude > 0) and (Camera.CFrame.LookVector * Config.FlySpeed) or Vector3.zero
+            BodyGyro.CFrame = Camera.CFrame
+        end)
+    end
+
+    -- Anti-Stun
+    if Config.AntiStunEnabled and tick() - LastAntiStunFix > 0.1 then
+        LastAntiStunFix = tick()
+        local c, h, hrp = GetChar(), GetHum(), GetHRP()
+        if c and h and hrp then
+            pcall(function()
+                RestoreStates(h)
+                if h.WalkSpeed < 16 then h.WalkSpeed = 16 end
+                if h.UseJumpPower and h.JumpPower < 50 then h.JumpPower = 50 end
+                if h.PlatformStand then h.PlatformStand = false end
+                if h.Sit then h.Sit = false end
+                if hrp.Anchored then hrp.Anchored = false end
+            end)
+        end
+    end
+
+    -- Fast Attack
+    if Config.FastAttackEnabled then
+        pcall(function()
+            local t = GetChar() and GetChar():FindFirstChildOfClass("Tool")
+            if t then t:Activate() end
+        end)
+    end
+
+    -- Auto Fuga
+    if Config.SafeAnchorEnabled then
+        local h = GetHum()
+        if h and h.Health <= h.MaxHealth * 0.15 and tick() - LastFuga > 3 then
+            PerformFuga(10000)
+        end
+    end
+end)
+
+-- ============================================================
+-- LOOPS SECUNDARIOS
+-- ============================================================
+RunService.RenderStepped:Connect(function()
+    FPSCounter = FPSCounter + 1
+    if tick() - LastFPSUpdate >= 0.5 then
+        CurrentFPS = math.floor(FPSCounter / (tick() - LastFPSUpdate))
+        FPSCounter = 0; LastFPSUpdate = tick()
+        local c = CurrentFPS >= 50 and Color3.fromRGB(60, 220, 100) or (CurrentFPS >= 30 and Color3.fromRGB(255, 200, 40) or Color3.fromRGB(255, 70, 70))
+        if Config.ShowFPS then FPSLabel.Text = "FPS: " .. CurrentFPS; FPSLabel.TextColor3 = c end
+    end
+end)
+
+task.spawn(function()
+    while ScriptActive do
+        task.wait(1)
+        local ping = 0
+        pcall(function() ping = math.floor(LocalPlayer:GetNetworkPing() * 1000) end)
+        if ping == 0 then pcall(function() ping = math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue()) end) end
+        local c = ping < 100 and Color3.fromRGB(60, 220, 100) or (ping < 200 and Color3.fromRGB(255, 200, 40) or Color3.fromRGB(255, 70, 70))
+        if Config.ShowPing then PingLabel.Text = "Ping: " .. ping .. "ms"; PingLabel.TextColor3 = c end
+    end
+end)
+
+task.spawn(function()
+    while ScriptActive do
+        task.wait(0.05)
+        local r = math.max(0, Config.DashCooldown - (tick() - LastDash))
+        if r > 0.05 then
+            DashCD.Text = string.format("%.1f", r)
+            DashBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        else
+            DashCD.Text = ""
+            DashBtn.BackgroundColor3 = OrangeGlow
+        end
+    end
+end)
+
+task.spawn(function()
+    while ScriptActive do
+        task.wait(0.1)
+        if Config.SilentAimEnabled and Config.CircleVisible then
+            local target = GetTargetInCircle()
+            if target then
+                CircleStroke.Color = Color3.fromRGB(60, 255, 100)
+                CrossH.BackgroundColor3 = Color3.fromRGB(60, 255, 100)
+                CrossV.BackgroundColor3 = Color3.fromRGB(60, 255, 100)
+                CircleLabel.Text = "🎯 " .. target.DisplayName
+                CircleLabel.TextColor3 = Color3.fromRGB(60, 255, 100)
+            else
+                CircleStroke.Color = OrangeGlow
+                CrossH.BackgroundColor3 = OrangeGlow
+                CrossV.BackgroundColor3 = OrangeGlow
+                CircleLabel.Text = "SILENT AIM"
+                CircleLabel.TextColor3 = OrangeGlow
+            end
+        end
+    end
+end)
+
+-- ============================================================
+-- INPUTS
+-- ============================================================
+UserInputService.JumpRequest:Connect(function()
+    if Config.MultiJumpEnabled then
+        local h = GetHum()
+        if h and h.FloorMaterial == Enum.Material.Air and JumpsUsed < Config.MaxJumps then
+            JumpsUsed = JumpsUsed + 1
+            pcall(function()
+                local hrp = GetHRP()
+                if hrp then
+                    hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, math.max(50, h.JumpPower), hrp.AssemblyLinearVelocity.Z)
+                end
+            end)
+        end
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.Q then PerformDash() end
+end)
+
+DashBtn.MouseButton1Click:Connect(PerformDash)
+DashBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch then PerformDash() end
+end)
+
+OpenBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFrame.Visible end)
+
+-- ============================================================
+-- INICIO
+-- ============================================================
+pcall(function()
+    Notify("🐉 TLG V5 FIXED", "BANG sin lag + todos los bugs arreglados ✅", 5)
+end)
+
+print("[TLG] V5 Fixed cargado - BANG suave activado 🐉")
