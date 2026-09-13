@@ -228,7 +228,6 @@ task.spawn(function()
     end
 end)
 
--- 📊 Panel de FPS/Ping
 local StatsFrame = Instance.new("Frame", Header)
 StatsFrame.Size = UDim2.new(0, 150, 0, 22)
 StatsFrame.Position = UDim2.new(0.5, -75, 0.5, -11)
@@ -796,98 +795,91 @@ local function StopMapOrbit()
 end
 
 ----------------------------------------------------------------
--- ⚡ FPS BOOSTER POTENTE
+-- ⚡ FPS BOOSTER SEGURO (NO bloquea habilidades)
 ----------------------------------------------------------------
 local function EnableFPSBooster()
     if FPSBoosterOn then return end
     FPSBoosterOn = true
 
-    -- 1. Lighting
+    -- 1. Lighting (solo efectos visuales seguros)
     pcall(function()
         local L = game:GetService("Lighting")
         L.GlobalShadows = false
         L.FogEnd = 9e9
         L.Brightness = 2
-        L.EnvironmentDiffuseScale = 0
-        L.EnvironmentSpecularScale = 0
-        L.Ambient = Color3.fromRGB(120, 120, 120)
-        L.OutdoorAmbient = Color3.fromRGB(120, 120, 120)
 
         for _, e in ipairs(L:GetChildren()) do
             if e:IsA("BloomEffect") or e:IsA("BlurEffect") or e:IsA("SunRaysEffect")
-            or e:IsA("ColorCorrectionEffect") or e:IsA("DepthOfFieldEffect")
-            or e:IsA("Atmosphere") then
+            or e:IsA("DepthOfFieldEffect") then
                 pcall(function() e.Enabled = false end)
-                pcall(function() e:Destroy() end)
             end
         end
     end)
 
-    -- 2. Partes y efectos del mundo
+    -- 2. Partes del mundo (solo decoración, no partes de gameplay)
     task.spawn(function()
         for _, obj in ipairs(workspace:GetDescendants()) do
             if not FPSBoosterOn then break end
             pcall(function()
-                if obj:IsA("BasePart") then
-                    obj.CastShadow = false
-                    if not obj:IsA("MeshPart") and not obj:IsA("UnionOperation") then
-                        if obj.Material ~= Enum.Material.Neon and obj.Material ~= Enum.Material.ForceField then
+                if obj:IsA("BasePart") and not obj:IsDescendantOf(LP.Character) then
+                    local name = obj.Name:lower()
+                    local important = string.find(name, "hitbox")
+                        or string.find(name, "skill")
+                        or string.find(name, "ability")
+                        or string.find(name, "attack")
+                        or string.find(name, "sword")
+                        or string.find(name, "tool")
+                        or string.find(name, "weapon")
+                        or string.find(name, "target")
+                        or string.find(name, "fruit")
+                        or string.find(name, "npc")
+                    if not important then
+                        obj.CastShadow = false
+                        if obj.Material ~= Enum.Material.Neon
+                        and obj.Material ~= Enum.Material.ForceField
+                        and obj.Material ~= Enum.Material.Glass then
                             obj.Material = Enum.Material.SmoothPlastic
                         end
                         obj.Reflectance = 0
                     end
-                elseif obj:IsA("Decal") or obj:IsA("Texture") then
-                    obj.Transparency = 1
                 elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire")
-                or obj:IsA("Sparkles") or obj:IsA("Trail") or obj:IsA("Beam") then
-                    obj.Enabled = false
+                or obj:IsA("Sparkles") then
+                    local parentName = obj.Parent and obj.Parent.Name:lower() or ""
+                    local isSkill = string.find(parentName, "skill")
+                        or string.find(parentName, "attack")
+                        or string.find(parentName, "hit")
+                        or string.find(parentName, "effect")
+                        or string.find(parentName, "aura")
+                    if not isSkill then
+                        obj.Enabled = false
+                    end
+                elseif obj:IsA("Trail") or obj:IsA("Beam") then
+                    -- No tocar Trail/Beam
+                elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                    local parentName = obj.Parent and obj.Parent.Name:lower() or ""
+                    local isImportant = string.find(parentName, "skill")
+                        or string.find(parentName, "attack")
+                        or string.find(parentName, "hitbox")
+                        or string.find(parentName, "fruit")
+                    if not isImportant then
+                        obj.Transparency = 1
+                    end
                 end
             end)
         end
     end)
 
-    -- 3. Terrain
+    -- 3. Terrain (solo decoraciones)
     pcall(function()
         local t = workspace:FindFirstChildOfClass("Terrain")
         if t then
             t.Decoration = false
             t.WaterWaveSize = 0
             t.WaterWaveSpeed = 0
-            t.WaterReflectance = 0
-            t.WaterTransparency = 1
         end
     end)
 
-    -- 4. Otros jugadores
-    task.spawn(function()
-        for _, plr in ipairs(P:GetPlayers()) do
-            if plr ~= LP and plr.Character then
-                for _, obj in ipairs(plr.Character:GetDescendants()) do
-                    pcall(function()
-                        if obj:IsA("BasePart") then
-                            obj.CastShadow = false
-                            obj.Material = Enum.Material.SmoothPlastic
-                        elseif obj:IsA("Decal") or obj:IsA("Texture") then
-                            obj.Transparency = 1
-                        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
-                            obj.Enabled = false
-                        end
-                    end)
-                end
-            end
-        end
-    end)
-
-    -- 5. Sonidos
-    pcall(function()
-        local SS = game:GetService("SoundService")
-        SS.AmbientReverb = Enum.ReverbType.NoReverb
-        for _, s in ipairs(SS:GetDescendants()) do
-            if s:IsA("Sound") then s.Volume = 0 end
-        end
-    end)
-
-    -- 6. Culling
+    -- 4. Culling seguro (excluye jugadores, skills, hitboxes, NPCs)
     FPSBoostConn = RS.Heartbeat:Connect(function()
         if not FPSBoosterOn then return end
         local char = LP.Character
@@ -898,18 +890,46 @@ local function EnableFPSBooster()
         for _, obj in ipairs(workspace:GetChildren()) do
             if (obj:IsA("Model") or obj:IsA("BasePart")) and obj ~= char and not obj:IsDescendantOf(char) then
                 pcall(function()
-                    local primary = obj:IsA("Model") and obj.PrimaryPart or obj
-                    if primary then
-                        local dist = (primary.Position - myPos).Magnitude
-                        local targetTrans = dist > FPS_CULL_DISTANCE and 1 or 0
+                    local isPlayer = false
+                    if obj:IsA("Model") and P:GetPlayerFromCharacter(obj) then
+                        isPlayer = true
+                    end
+
+                    local name = obj.Name:lower()
+                    local isImportant = string.find(name, "skill")
+                        or string.find(name, "hitbox")
+                        or string.find(name, "attack")
+                        or string.find(name, "tool")
+                        or string.find(name, "sword")
+                        or string.find(name, "weapon")
+                        or string.find(name, "fruit")
+                        or string.find(name, "npc")
+                        or string.find(name, "target")
+
+                    if isPlayer or isImportant then
                         if obj:IsA("Model") then
                             for _, part in ipairs(obj:GetDescendants()) do
                                 if part:IsA("BasePart") then
-                                    part.LocalTransparencyModifier = targetTrans
+                                    part.LocalTransparencyModifier = 0
                                 end
                             end
-                        else
-                            obj.LocalTransparencyModifier = targetTrans
+                        elseif obj:IsA("BasePart") then
+                            obj.LocalTransparencyModifier = 0
+                        end
+                    else
+                        local primary = obj:IsA("Model") and obj.PrimaryPart or obj
+                        if primary then
+                            local dist = (primary.Position - myPos).Magnitude
+                            local targetTrans = dist > FPS_CULL_DISTANCE and 1 or 0
+                            if obj:IsA("Model") then
+                                for _, part in ipairs(obj:GetDescendants()) do
+                                    if part:IsA("BasePart") then
+                                        part.LocalTransparencyModifier = targetTrans
+                                    end
+                                end
+                            else
+                                obj.LocalTransparencyModifier = targetTrans
+                            end
                         end
                     end
                 end)
@@ -930,7 +950,6 @@ local function DisableFPSBooster()
         L.FogEnd = 100000
         L.Brightness = 1
     end)
-    -- Restaurar visibilidad
     for _, obj in ipairs(workspace:GetChildren()) do
         pcall(function()
             if obj:IsA("Model") then
@@ -1227,7 +1246,7 @@ do
         if v then EnableFPSBooster() else DisableFPSBooster() end
     end)
     CreateSlider(boxFPS, "Distancia Culling", 100, 2000, 500, function(v) FPS_CULL_DISTANCE = v end)
-    CreateLabel(boxFPS, "Optimiza todo para max FPS", C.Text2)
+    CreateLabel(boxFPS, "Optimiza sin bloquear habilidades", C.Text2)
 
     local boxSpeed = CreateBox(Col3, "SPEEDHACK", "🏃")
     CreateStatus(boxSpeed, "Activar", false, function(v) SHon = v end)
