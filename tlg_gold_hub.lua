@@ -1,11 +1,10 @@
 --====================================================================--
---              TLG GOLD HUB - PC & MOBILE EDITION                    --
---      Compatible con PC y Celular | Sin errores | Camera Fly        --
+--              TLG GOLD HUB - FPS BOOSTER EDITION                    --
+--      Compatible con PC y Celular | FPS/Ping | Fly por Joystick     --
 --====================================================================--
 
--- ✅ Servicios con pcall por si fallan en algún ejecutor
 local services = {}
-for _, name in ipairs({"TweenService","UserInputService","Players","RunService","CoreGui","VirtualUser","Debris"}) do
+for _, name in ipairs({"TweenService","UserInputService","Players","RunService","CoreGui","VirtualUser","Debris","Lighting","SoundService"}) do
     local ok, s = pcall(function() return game:GetService(name) end)
     services[name] = ok and s or nil
 end
@@ -21,7 +20,6 @@ local Debris = services.Debris
 local LP = P.LocalPlayer
 local Cam = workspace.CurrentCamera
 
--- ✅ Detección de plataforma
 local IS_MOBILE = false
 local IS_PC = false
 pcall(function()
@@ -32,7 +30,6 @@ pcall(function()
     end
 end)
 
--- ✅ Drawing opcional
 local HAS_DRAWING = false
 pcall(function()
     if typeof(Drawing) == "table" and Drawing.new then
@@ -41,7 +38,6 @@ pcall(function()
     end
 end)
 
--- ✅ Parent de GUI con múltiples fallbacks
 local function GetGUIParent()
     if gethui then
         local ok, hui = pcall(gethui)
@@ -60,7 +56,6 @@ end
 
 local SP = GetGUIParent()
 
--- Limpiar GUIs anteriores
 for _, n in ipairs({"TLG_GoldHub","TLG_FloatButtons"}) do
     pcall(function()
         local o = SP:FindFirstChild(n)
@@ -140,8 +135,8 @@ WinStroke.Color = C.Gold
 WinStroke.Thickness = 1.5
 WinStroke.Transparency = 0.2
 
-local W_SIZE = UDim2.new(0, 500, 0, 300)
-local W_POS = UDim2.new(0.5, -250, 0.5, -150)
+local W_SIZE = UDim2.new(0, 500, 0, 320)
+local W_POS = UDim2.new(0.5, -250, 0.5, -160)
 
 local function MakeDraggable(obj, handle)
     local drag, ds, sp = false, nil, nil
@@ -202,20 +197,22 @@ local function MakeButtonDraggable(btn)
 end
 
 ----------------------------------------------------------------
--- HEADER
+-- HEADER CON FPS/PING
 ----------------------------------------------------------------
 local Header = Instance.new("Frame", Window)
-Header.Size = UDim2.new(1, 0, 0, 24)
+Header.Size = UDim2.new(1, 0, 0, 34)
 Header.BackgroundColor3 = C.BG
 Header.BorderSizePixel = 0
 
 local Title = Instance.new("TextLabel", Header)
-Title.Size = UDim2.new(1, 0, 1, 0)
+Title.Size = UDim2.new(0, 180, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.GothamBold
-Title.Text = "👑 TLG GOLD HUB 👑"
+Title.Text = "👑 TLG GOLD HUB"
 Title.TextColor3 = C.Gold
 Title.TextSize = 10
+Title.TextXAlignment = Enum.TextXAlignment.Left
 
 task.spawn(function()
     while Title.Parent do
@@ -231,9 +228,60 @@ task.spawn(function()
     end
 end)
 
+-- 📊 Panel de FPS/Ping
+local StatsFrame = Instance.new("Frame", Header)
+StatsFrame.Size = UDim2.new(0, 150, 0, 22)
+StatsFrame.Position = UDim2.new(0.5, -75, 0.5, -11)
+StatsFrame.BackgroundColor3 = C.Box
+StatsFrame.BorderSizePixel = 0
+Instance.new("UICorner", StatsFrame).CornerRadius = UDim.new(0, 4)
+Instance.new("UIStroke", StatsFrame).Color = C.BoxBorder
+
+local FPSLabel = Instance.new("TextLabel", StatsFrame)
+FPSLabel.Size = UDim2.new(0.5, -6, 1, 0)
+FPSLabel.Position = UDim2.new(0, 6, 0, 0)
+FPSLabel.BackgroundTransparency = 1
+FPSLabel.Font = Enum.Font.GothamBold
+FPSLabel.Text = "FPS: --"
+FPSLabel.TextColor3 = C.Green
+FPSLabel.TextSize = 9
+FPSLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local PingLabel = Instance.new("TextLabel", StatsFrame)
+PingLabel.Size = UDim2.new(0.5, -6, 1, 0)
+PingLabel.Position = UDim2.new(0.5, 0, 0, 0)
+PingLabel.BackgroundTransparency = 1
+PingLabel.Font = Enum.Font.GothamBold
+PingLabel.Text = "Ping: --"
+PingLabel.TextColor3 = C.Gold
+PingLabel.TextSize = 9
+PingLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+task.spawn(function()
+    local frameCount = 0
+    local lastSecond = tick()
+    RS.RenderStepped:Connect(function()
+        frameCount = frameCount + 1
+        local now = tick()
+        if now - lastSecond >= 1 then
+            local fps = math.floor(frameCount / (now - lastSecond))
+            local pingMs = 0
+            pcall(function()
+                pingMs = math.floor((LP:GetNetworkPing() or 0) * 1000)
+            end)
+            FPSLabel.Text = "FPS: " .. fps
+            PingLabel.Text = "Ping: " .. pingMs .. "ms"
+            FPSLabel.TextColor3 = fps >= 50 and C.Green or (fps >= 30 and C.Gold or C.Red)
+            PingLabel.TextColor3 = pingMs <= 60 and C.Green or (pingMs <= 150 and C.Gold or C.Red)
+            frameCount = 0
+            lastSecond = now
+        end
+    end)
+end)
+
 local CloseBtn = Instance.new("TextButton", Header)
 CloseBtn.Size = UDim2.new(0, 22, 0, 22)
-CloseBtn.Position = UDim2.new(1, -26, 0.5, -11)
+CloseBtn.Position = UDim2.new(1, -28, 0.5, -11)
 CloseBtn.BackgroundTransparency = 1
 CloseBtn.Text = "✕"
 CloseBtn.Font = Enum.Font.GothamBold
@@ -245,7 +293,7 @@ MakeDraggable(Window, Header)
 
 local Divider = Instance.new("Frame", Window)
 Divider.Size = UDim2.new(1, -10, 0, 1)
-Divider.Position = UDim2.new(0, 5, 0, 25)
+Divider.Position = UDim2.new(0, 5, 0, 35)
 Divider.BackgroundColor3 = C.Gold
 Divider.BackgroundTransparency = 0.6
 Divider.BorderSizePixel = 0
@@ -254,8 +302,8 @@ Divider.BorderSizePixel = 0
 -- 3 COLUMNAS
 ----------------------------------------------------------------
 local ColumnsFrame = Instance.new("Frame", Window)
-ColumnsFrame.Size = UDim2.new(1, -10, 1, -34)
-ColumnsFrame.Position = UDim2.new(0, 5, 0, 30)
+ColumnsFrame.Size = UDim2.new(1, -10, 1, -44)
+ColumnsFrame.Position = UDim2.new(0, 5, 0, 40)
 ColumnsFrame.BackgroundTransparency = 1
 
 local ColumnsLayout = Instance.new("UIListLayout", ColumnsFrame)
@@ -568,8 +616,13 @@ local ESPon = false
 local ESPboxes = {}
 local AntiStunOn = false
 
+-- ⚡ FPS Booster
+local FPSBoosterOn = false
+local FPSBoostConn = nil
+local FPS_CULL_DISTANCE = 500
+
 ----------------------------------------------------------------
--- STOP FLY (para uso interno)
+-- STOP FLY
 ----------------------------------------------------------------
 local function StopFlyInternal()
     V3 = false
@@ -594,7 +647,7 @@ local function StopFlyInternal()
 end
 
 ----------------------------------------------------------------
--- ✈️ FLY POR JOYSTICK (PC + Móvil)
+-- ✈️ FLY POR JOYSTICK
 ----------------------------------------------------------------
 local function StartFlyInternal()
     if V3 then return end
@@ -740,6 +793,155 @@ local function StopMapOrbit()
         end)
     end
     if hu then pcall(function() hu.PlatformStand = false end) end
+end
+
+----------------------------------------------------------------
+-- ⚡ FPS BOOSTER POTENTE
+----------------------------------------------------------------
+local function EnableFPSBooster()
+    if FPSBoosterOn then return end
+    FPSBoosterOn = true
+
+    -- 1. Lighting
+    pcall(function()
+        local L = game:GetService("Lighting")
+        L.GlobalShadows = false
+        L.FogEnd = 9e9
+        L.Brightness = 2
+        L.EnvironmentDiffuseScale = 0
+        L.EnvironmentSpecularScale = 0
+        L.Ambient = Color3.fromRGB(120, 120, 120)
+        L.OutdoorAmbient = Color3.fromRGB(120, 120, 120)
+
+        for _, e in ipairs(L:GetChildren()) do
+            if e:IsA("BloomEffect") or e:IsA("BlurEffect") or e:IsA("SunRaysEffect")
+            or e:IsA("ColorCorrectionEffect") or e:IsA("DepthOfFieldEffect")
+            or e:IsA("Atmosphere") then
+                pcall(function() e.Enabled = false end)
+                pcall(function() e:Destroy() end)
+            end
+        end
+    end)
+
+    -- 2. Partes y efectos del mundo
+    task.spawn(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if not FPSBoosterOn then break end
+            pcall(function()
+                if obj:IsA("BasePart") then
+                    obj.CastShadow = false
+                    if not obj:IsA("MeshPart") and not obj:IsA("UnionOperation") then
+                        if obj.Material ~= Enum.Material.Neon and obj.Material ~= Enum.Material.ForceField then
+                            obj.Material = Enum.Material.SmoothPlastic
+                        end
+                        obj.Reflectance = 0
+                    end
+                elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                    obj.Transparency = 1
+                elseif obj:IsA("ParticleEmitter") or obj:IsA("Smoke") or obj:IsA("Fire")
+                or obj:IsA("Sparkles") or obj:IsA("Trail") or obj:IsA("Beam") then
+                    obj.Enabled = false
+                end
+            end)
+        end
+    end)
+
+    -- 3. Terrain
+    pcall(function()
+        local t = workspace:FindFirstChildOfClass("Terrain")
+        if t then
+            t.Decoration = false
+            t.WaterWaveSize = 0
+            t.WaterWaveSpeed = 0
+            t.WaterReflectance = 0
+            t.WaterTransparency = 1
+        end
+    end)
+
+    -- 4. Otros jugadores
+    task.spawn(function()
+        for _, plr in ipairs(P:GetPlayers()) do
+            if plr ~= LP and plr.Character then
+                for _, obj in ipairs(plr.Character:GetDescendants()) do
+                    pcall(function()
+                        if obj:IsA("BasePart") then
+                            obj.CastShadow = false
+                            obj.Material = Enum.Material.SmoothPlastic
+                        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                            obj.Transparency = 1
+                        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
+                            obj.Enabled = false
+                        end
+                    end)
+                end
+            end
+        end
+    end)
+
+    -- 5. Sonidos
+    pcall(function()
+        local SS = game:GetService("SoundService")
+        SS.AmbientReverb = Enum.ReverbType.NoReverb
+        for _, s in ipairs(SS:GetDescendants()) do
+            if s:IsA("Sound") then s.Volume = 0 end
+        end
+    end)
+
+    -- 6. Culling
+    FPSBoostConn = RS.Heartbeat:Connect(function()
+        if not FPSBoosterOn then return end
+        local char = LP.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local myPos = hrp.Position
+
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if (obj:IsA("Model") or obj:IsA("BasePart")) and obj ~= char and not obj:IsDescendantOf(char) then
+                pcall(function()
+                    local primary = obj:IsA("Model") and obj.PrimaryPart or obj
+                    if primary then
+                        local dist = (primary.Position - myPos).Magnitude
+                        local targetTrans = dist > FPS_CULL_DISTANCE and 1 or 0
+                        if obj:IsA("Model") then
+                            for _, part in ipairs(obj:GetDescendants()) do
+                                if part:IsA("BasePart") then
+                                    part.LocalTransparencyModifier = targetTrans
+                                end
+                            end
+                        else
+                            obj.LocalTransparencyModifier = targetTrans
+                        end
+                    end
+                end)
+            end
+        end
+    end)
+end
+
+local function DisableFPSBooster()
+    FPSBoosterOn = false
+    if FPSBoostConn then
+        FPSBoostConn:Disconnect()
+        FPSBoostConn = nil
+    end
+    pcall(function()
+        local L = game:GetService("Lighting")
+        L.GlobalShadows = true
+        L.FogEnd = 100000
+        L.Brightness = 1
+    end)
+    -- Restaurar visibilidad
+    for _, obj in ipairs(workspace:GetChildren()) do
+        pcall(function()
+            if obj:IsA("Model") then
+                for _, part in ipairs(obj:GetDescendants()) do
+                    if part:IsA("BasePart") then part.LocalTransparencyModifier = 0 end
+                end
+            elseif obj:IsA("BasePart") then
+                obj.LocalTransparencyModifier = 0
+            end
+        end)
+    end
 end
 
 ----------------------------------------------------------------
@@ -1006,11 +1208,6 @@ do
     end)
     CreateSlider(boxFly, "Velocidad", 100, 1000000, 100000, function(v) VSpd = v end)
     CreateLabel(boxFly, "Vuela hacia donde apunta el joystick", C.Text2)
-    if IS_PC then
-        CreateLabel(boxFly, "PC: usa WASD para volar", C.Text2)
-    else
-        CreateLabel(boxFly, "Móvil: mueve el joystick", C.Text2)
-    end
 end
 
 ----------------------------------------------------------------
@@ -1025,6 +1222,13 @@ do
     CreateSlider(boxMapOrbit, "Radio", 50, 1000, 300, function(v) MapOrbitRadius = v end)
     CreateSlider(boxMapOrbit, "Altura", 10, 1000, 100, function(v) MapOrbitHeight = v end)
 
+    local boxFPS = CreateBox(Col3, "FPS BOOSTER", "⚡")
+    CreateStatus(boxFPS, "Activar FPS Booster", false, function(v)
+        if v then EnableFPSBooster() else DisableFPSBooster() end
+    end)
+    CreateSlider(boxFPS, "Distancia Culling", 100, 2000, 500, function(v) FPS_CULL_DISTANCE = v end)
+    CreateLabel(boxFPS, "Optimiza todo para max FPS", C.Text2)
+
     local boxSpeed = CreateBox(Col3, "SPEEDHACK", "🏃")
     CreateStatus(boxSpeed, "Activar", false, function(v) SHon = v end)
     CreateSlider(boxSpeed, "Velocidad", 16, 500, 100, function(v) SHv = v end)
@@ -1036,16 +1240,6 @@ do
         if h then h.CFrame = h.CFrame + Vector3.new(0, EH, 0) end
     end)
     CreateSlider(boxFuga, "Altura", 1000, 50000, 10000, function(v) EH = v end)
-
-    local boxFloat = CreateBox(Col3, "BOTONES FLOTANTES", "🎯")
-    CreateStatus(boxFloat, "Mostrar Botón Fly", true, function(v)
-        ShowFlyButton = v
-        if FlyBtn then FlyBtn.Visible = v end
-    end)
-    CreateStatus(boxFloat, "Mostrar Botón Fuga", true, function(v)
-        ShowFugaButton = v
-        if FugaBtn then FugaBtn.Visible = v end
-    end)
 
     local boxStun = CreateBox(Col3, "ANTI-STUN", "🛡")
     CreateStatus(boxStun, "Activar", false, function(v) AntiStunOn = v end)
@@ -1128,7 +1322,6 @@ FloatSG.ResetOnSpawn = false
 FloatSG.DisplayOrder = 999
 FloatSG.IgnoreGuiInset = true
 
--- MENU
 local MenuBtn = Instance.new("TextButton", FloatSG)
 MenuBtn.Size = UDim2.new(0, 42, 0, 42)
 MenuBtn.Position = UDim2.new(0.02, 0, 0.05, 0)
@@ -1171,7 +1364,6 @@ MenuBtn.MouseButton1Click:Connect(function()
 end)
 CloseBtn.MouseButton1Click:Connect(CloseMenu)
 
--- FLY
 FlyBtn = Instance.new("TextButton", FloatSG)
 FlyBtn.Size = UDim2.new(0, 95, 0, 42)
 FlyBtn.Position = UDim2.new(0.02, 0, 0.55, 0)
@@ -1201,7 +1393,6 @@ FlyBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- FUGA
 FugaBtn = Instance.new("TextButton", FloatSG)
 FugaBtn.Size = UDim2.new(0, 95, 0, 42)
 FugaBtn.Position = UDim2.new(0.02, 0, 0.63, 0)
