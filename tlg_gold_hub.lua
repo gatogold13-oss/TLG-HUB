@@ -43,12 +43,10 @@ end)
 
 -- ✅ Parent de GUI con múltiples fallbacks
 local function GetGUIParent()
-    -- Intento 1: gethui
     if gethui then
         local ok, hui = pcall(gethui)
         if ok and hui then return hui end
     end
-    -- Intento 2: CoreGui
     if CG then
         local ok = pcall(function()
             local test = Instance.new("Folder")
@@ -57,7 +55,6 @@ local function GetGUIParent()
         end)
         if ok then return CG end
     end
-    -- Fallback universal: PlayerGui
     return LP:WaitForChild("PlayerGui")
 end
 
@@ -96,11 +93,18 @@ local C = {
 ----------------------------------------------------------------
 -- ✅ DECLARACIÓN ANTICIPADA
 ----------------------------------------------------------------
-local FlyBtn, FugaBtn
+local FlyBtn, FugaBtn, FlyStatusRef, MapOrbitStatusRef
 local ShowFlyButton = true
 local ShowFugaButton = true
 
-local V3, VSpd = false, 500000
+local V3, VSpd = false, 100000
+local MapOrbitOn = false
+local MapOrbitSpeed = 3000
+local MapOrbitAngle = 0
+local MapOrbitRadius = 300
+local MapOrbitHeight = 100
+local MapOrbitConn = nil
+
 local PC = nil
 pcall(function()
     local pm = LP:WaitForChild("PlayerScripts", 10)
@@ -139,7 +143,6 @@ WinStroke.Transparency = 0.2
 local W_SIZE = UDim2.new(0, 500, 0, 300)
 local W_POS = UDim2.new(0.5, -250, 0.5, -150)
 
--- ✅ Drag unificado (mouse + touch)
 local function MakeDraggable(obj, handle)
     local drag, ds, sp = false, nil, nil
     handle.InputBegan:Connect(function(i)
@@ -158,7 +161,6 @@ local function MakeDraggable(obj, handle)
     end)
 end
 
--- ✅ Botón arrastrable sin romper click
 local function MakeButtonDraggable(btn)
     local dragStart, startPos
     local isDragging = false
@@ -436,7 +438,24 @@ local function CreateStatus(parent, text, defaultOn, callback)
         end
         pcall(callback, state)
     end)
-    return fr
+
+    return fr, {
+        SetState = function(newState)
+            state = newState
+            if state then
+                box.BackgroundColor3 = C.Green
+                check.Visible = true
+                stateLbl.Text = "ON"
+                stateLbl.TextColor3 = C.Green
+            else
+                box.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+                check.Visible = false
+                stateLbl.Text = "OFF"
+                stateLbl.TextColor3 = C.Red
+            end
+        end,
+        GetState = function() return state end
+    }
 end
 
 local function CreateSlider(parent, text, min, max, default, callback)
@@ -487,7 +506,6 @@ local function CreateSlider(parent, text, min, max, default, callback)
     knob.BorderSizePixel = 0
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
 
-    -- ✅ Área táctil más grande para móvil
     local touchHeight = IS_MOBILE and 22 or 20
     local touch = Instance.new("TextButton", fr)
     touch.Size = UDim2.new(1, -4, 0, touchHeight)
@@ -539,7 +557,6 @@ end
 -- VARIABLES DE ESTADO
 ----------------------------------------------------------------
 local SHon, SHv = false, 100
-local FAon, FAs = false, 15
 local EH = 10000
 local HBCelesteOn, HBCelesteSize = false, 10
 local HBCelesteConn
@@ -550,64 +567,44 @@ local GOT, GOC, GOd, GOs, GOh, GOang = nil, nil, 5, 3, 0, 0
 local ESPon = false
 local ESPboxes = {}
 local AntiStunOn = false
-local AntiVoidOn = false
-local AntiVoidYThreshold = -100
-local AntiVoidLastSafePos = Vector3.new(0, 100, 0)
-local AntiVoidConn
 
 ----------------------------------------------------------------
--- ANTI-VOID
+-- STOP FLY (para uso interno)
 ----------------------------------------------------------------
-local function StartAntiVoid()
-    if AntiVoidConn then return end
-    AntiVoidOn = true
-    AntiVoidConn = RS.Heartbeat:Connect(function()
-        if not AntiVoidOn then return end
-        if V3 then return end
-        local c = LP.Character
-        if not c then return end
-        local h = c:FindFirstChild("HumanoidRootPart")
-        local hum = c:FindFirstChildOfClass("Humanoid")
-        if not h or not hum or hum.Health <= 0 then return end
-
-        if hum.FloorMaterial ~= Enum.Material.Air then
-            AntiVoidLastSafePos = h.Position
-        end
-
-        local isFalling = false
-        if h.Position.Y < AntiVoidYThreshold then
-            isFalling = true
-        else
-            local ok, result = pcall(function()
-                local rp = RaycastParams.new()
-                pcall(function() rp.FilterType = Enum.RaycastFilterType.Exclude end)
-                pcall(function() rp.FilterType = Enum.RaycastFilterType.Blacklist end)
-                rp.FilterDescendantsInstances = {c}
-                return workspace:Raycast(h.Position, Vector3.new(0, -500, 0), rp)
-            end)
-            if ok and not result then isFalling = true end
-        end
-
-        if isFalling then
-            local target = AntiVoidLastSafePos
-            if target.Y < AntiVoidYThreshold then target = Vector3.new(0, 100, 0) end
-            h.AssemblyLinearVelocity = Vector3.zero
-            h.CFrame = CFrame.new(target + Vector3.new(0, 5, 0))
-            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-        end
-    end)
-end
-
-local function StopAntiVoid()
-    AntiVoidOn = false
-    if AntiVoidConn then AntiVoidConn:Disconnect(); AntiVoidConn = nil end
+local function StopFlyInternal()
+    V3 = false
+    local c = LP.Character
+    local h = c and c:FindFirstChild("HumanoidRootPart")
+    local hu = c and c:FindFirstChildOfClass("Humanoid")
+    if h then
+        pcall(function()
+            local bv = h:FindFirstChild("BodyVelocity"); if bv then bv:Destroy() end
+            local bg = h:FindFirstChild("BodyGyro"); if bg then bg:Destroy() end
+        end)
+    end
+    if hu then pcall(function() hu.PlatformStand = false end) end
+    if FlyBtn then
+        FlyBtn.Text = "✈ FLY: OFF"
+        FlyBtn.BackgroundColor3 = C.BG
+        FlyBtn.TextColor3 = C.Gold
+    end
+    if FlyStatusRef then
+        FlyStatusRef.SetState(false)
+    end
 end
 
 ----------------------------------------------------------------
--- ✈️ FLY POR CÁMARA (compatible PC + Móvil)
+-- ✈️ FLY POR JOYSTICK (PC + Móvil)
 ----------------------------------------------------------------
-function StartFlyInternal()
+local function StartFlyInternal()
     if V3 then return end
+
+    if MapOrbitOn then
+        MapOrbitOn = false
+        if MapOrbitConn then MapOrbitConn:Disconnect() MapOrbitConn = nil end
+        if MapOrbitStatusRef then MapOrbitStatusRef.SetState(false) end
+    end
+
     V3 = true
     task.spawn(function()
         local c = LP.Character or LP.CharacterAdded:Wait()
@@ -636,7 +633,6 @@ function StartFlyInternal()
                 return
             end
 
-            -- Recrear si fue destruido
             if not bv.Parent then
                 bv = Instance.new("BodyVelocity", h)
                 bv.MaxForce = Vector3.new(1e10, 1e10, 1e10)
@@ -650,46 +646,90 @@ function StartFlyInternal()
 
             bg.CFrame = Cam.CFrame
 
-            -- Movimiento por cámara
-            local mv = Cam.CFrame.LookVector
-
-            -- En PC: opciones adicionales con teclado
-            if IS_PC then
-                local keyDir = Vector3.zero
-                if UI:IsKeyDown(Enum.KeyCode.W) then keyDir = keyDir + Cam.CFrame.LookVector end
-                if UI:IsKeyDown(Enum.KeyCode.S) then keyDir = keyDir - Cam.CFrame.LookVector end
-                if UI:IsKeyDown(Enum.KeyCode.A) then keyDir = keyDir - Cam.CFrame.RightVector end
-                if UI:IsKeyDown(Enum.KeyCode.D) then keyDir = keyDir + Cam.CFrame.RightVector end
-                if keyDir.Magnitude > 0.05 then mv = keyDir end
-
-                -- Space sube, Shift baja
-                if UI:IsKeyDown(Enum.KeyCode.Space) then
-                    mv = mv + Vector3.new(0, 1, 0)
-                elseif UI:IsKeyDown(Enum.KeyCode.LeftShift) then
-                    mv = mv - Vector3.new(0, 1, 0)
-                end
-            end
-
-            -- En móvil: usar MoveVector del joystick si existe
-            if IS_MOBILE and PC then
+            local moveInput = Vector3.zero
+            if PC then
                 local ok, v3 = pcall(function() return PC:GetMoveVector() end)
-                if ok and v3 and v3.Magnitude > 0.05 then
-                    mv = (Cam.CFrame.LookVector * -v3.Z) + (Cam.CFrame.RightVector * v3.X)
-                    mv = Vector3.new(mv.X, 0, mv.Z)
-                end
+                if ok and v3 then moveInput = v3 end
             end
 
-            if mv.Magnitude > 0.05 then
-                bv.Velocity = mv.Unit * VSpd
-            else
+            if moveInput.Magnitude < 0.05 then
                 bv.Velocity = Vector3.zero
+            else
+                local camCF = Cam.CFrame
+                local moveDir = (camCF.LookVector * -moveInput.Z) + (camCF.RightVector * moveInput.X)
+
+                if moveDir.Magnitude > 0.05 then
+                    bv.Velocity = moveDir.Unit * VSpd
+                else
+                    bv.Velocity = Vector3.zero
+                end
             end
         end)
     end)
 end
 
-function StopFlyInternal()
-    V3 = false
+----------------------------------------------------------------
+-- 🪐 ORBIT MAPA
+----------------------------------------------------------------
+local function StartMapOrbit()
+    if MapOrbitConn then return end
+
+    if V3 then
+        V3 = false
+        if FlyStatusRef then FlyStatusRef.SetState(false) end
+        if FlyBtn then
+            FlyBtn.Text = "✈ FLY: OFF"
+            FlyBtn.BackgroundColor3 = C.BG
+            FlyBtn.TextColor3 = C.Gold
+        end
+    end
+
+    MapOrbitOn = true
+    MapOrbitAngle = 0
+
+    task.spawn(function()
+        local c = LP.Character or LP.CharacterAdded:Wait()
+        local h = c:WaitForChild("HumanoidRootPart", 5)
+        local hu = c:FindFirstChildOfClass("Humanoid")
+        if not h or not hu then MapOrbitOn = false; return end
+
+        hu.PlatformStand = true
+
+        local centerX, centerZ = 0, 0
+
+        MapOrbitConn = RS.Heartbeat:Connect(function(dt)
+            if not MapOrbitOn or not h.Parent or not LP.Character or LP.Character ~= c then
+                if MapOrbitConn then MapOrbitConn:Disconnect() MapOrbitConn = nil end
+                pcall(function() if hu then hu.PlatformStand = false end end)
+                return
+            end
+
+            if not hu.PlatformStand then hu.PlatformStand = true end
+
+            local angularVelocity = MapOrbitSpeed / math.max(MapOrbitRadius, 1)
+            if angularVelocity > 20 then angularVelocity = 20 end
+
+            MapOrbitAngle = MapOrbitAngle + angularVelocity * dt
+            if MapOrbitAngle > math.pi * 2 then
+                MapOrbitAngle = MapOrbitAngle - math.pi * 2
+            end
+
+            local x = centerX + math.cos(MapOrbitAngle) * MapOrbitRadius
+            local z = centerZ + math.sin(MapOrbitAngle) * MapOrbitRadius
+            local targetPos = Vector3.new(x, MapOrbitHeight, z)
+
+            local lookAt = Vector3.new(centerX, MapOrbitHeight, centerZ)
+            h.CFrame = CFrame.new(targetPos, lookAt)
+        end)
+    end)
+end
+
+local function StopMapOrbit()
+    MapOrbitOn = false
+    if MapOrbitConn then
+        MapOrbitConn:Disconnect()
+        MapOrbitConn = nil
+    end
     local c = LP.Character
     local h = c and c:FindFirstChild("HumanoidRootPart")
     local hu = c and c:FindFirstChildOfClass("Humanoid")
@@ -705,12 +745,12 @@ end
 ----------------------------------------------------------------
 -- GOD ORB
 ----------------------------------------------------------------
-function StopGO()
+local function StopGO()
     GOT = nil; GOang = 0
     if GOC then GOC:Disconnect(); GOC = nil end
 end
 
-function StartGO(plr)
+local function StartGO(plr)
     GOT = plr; GOang = 0
     if GOC then GOC:Disconnect() end
     GOC = RS.Heartbeat:Connect(function(dt)
@@ -731,7 +771,7 @@ end
 ----------------------------------------------------------------
 -- HITBOX
 ----------------------------------------------------------------
-function StartCeleste()
+local function StartCeleste()
     if HBCelesteConn then return end
     local function apply()
         for _, plr in ipairs(P:GetPlayers()) do pcall(function()
@@ -753,7 +793,7 @@ function StartCeleste()
     end)
 end
 
-function StopCeleste()
+local function StopCeleste()
     HBCelesteOn = false
     HBCelesteConn = nil
     for _, plr in ipairs(P:GetPlayers()) do pcall(function()
@@ -769,7 +809,7 @@ function StopCeleste()
     end) end
 end
 
-function StartGiant()
+local function StartGiant()
     if HBGiantConn then return end
     local function apply()
         for _, plr in ipairs(P:GetPlayers()) do pcall(function()
@@ -792,7 +832,7 @@ function StartGiant()
     end)
 end
 
-function StopGiant()
+local function StopGiant()
     HBGiantOn = false
     HBGiantConn = nil
     for _, plr in ipairs(P:GetPlayers()) do pcall(function()
@@ -855,7 +895,7 @@ do
     pcall(function() PlayerScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y end)
     Instance.new("UIListLayout", PlayerScroll).Padding = UDim.new(0, 2)
 
-    function PopulatePlayerList()
+    local function PopulatePlayerList()
         pcall(function()
             for _, c in ipairs(PlayerScroll:GetChildren()) do
                 if c:IsA("TextButton") then c:Destroy() end
@@ -900,6 +940,7 @@ do
 
     P.PlayerAdded:Connect(function() task.wait(0.1); PopulatePlayerList() end)
     P.PlayerRemoving:Connect(function() task.wait(0.1); PopulatePlayerList() end)
+    task.spawn(PopulatePlayerList)
 
     local boxOrb = CreateBox(Col1, "GOD ORB", "🌀")
     CreateSlider(boxOrb, "Distancia", 2, 30, 5, function(v) GOd = v end)
@@ -959,16 +1000,16 @@ do
         end
     end)
 
-    local boxFly = CreateBox(Col2, "FLY (CÁMARA)", "✈")
-    CreateStatus(boxFly, "Activar Fly", false, function(v)
+    local boxFly = CreateBox(Col2, "FLY (JOYSTICK)", "✈")
+    _, FlyStatusRef = CreateStatus(boxFly, "Activar Fly", false, function(v)
         if v then StartFlyInternal() else StopFlyInternal() end
     end)
-    CreateSlider(boxFly, "Velocidad", 100, 1000000, 500000, function(v) VSpd = v end)
-    CreateLabel(boxFly, "Vuela hacia la cámara", C.Text2)
+    CreateSlider(boxFly, "Velocidad", 100, 1000000, 100000, function(v) VSpd = v end)
+    CreateLabel(boxFly, "Vuela hacia donde apunta el joystick", C.Text2)
     if IS_PC then
-        CreateLabel(boxFly, "PC: Space sube, Shift baja, WASD lateral", C.Text2)
+        CreateLabel(boxFly, "PC: usa WASD para volar", C.Text2)
     else
-        CreateLabel(boxFly, "Móvil: mueve la cámara para volar", C.Text2)
+        CreateLabel(boxFly, "Móvil: mueve el joystick", C.Text2)
     end
 end
 
@@ -976,32 +1017,17 @@ end
 -- COLUMNA 3
 ----------------------------------------------------------------
 do
-    local boxAttack = CreateBox(Col3, "FAST ATTACK", "⚔")
-    CreateStatus(boxAttack, "Activar", false, function(v)
-        FAon = v
-        if not v then return end
-        task.spawn(function()
-            while FAon do
-                pcall(function() VU:ClickButton1(Vector2.new(0,0)) end)
-                pcall(function()
-                    local t = LP.Character and LP.Character:FindFirstChildOfClass("Tool")
-                    if t then t:Activate() end
-                end)
-                task.wait(1 / FAs)
-            end
-        end)
+    local boxMapOrbit = CreateBox(Col3, "ORBIT MAPA", "🪐")
+    _, MapOrbitStatusRef = CreateStatus(boxMapOrbit, "Activar", false, function(v)
+        if v then StartMapOrbit() else StopMapOrbit() end
     end)
-    CreateSlider(boxAttack, "Clicks/seg", 5, 40, 15, function(v) FAs = v end)
+    CreateSlider(boxMapOrbit, "Velocidad", 500, 20000, 3000, function(v) MapOrbitSpeed = v end)
+    CreateSlider(boxMapOrbit, "Radio", 50, 1000, 300, function(v) MapOrbitRadius = v end)
+    CreateSlider(boxMapOrbit, "Altura", 10, 1000, 100, function(v) MapOrbitHeight = v end)
 
     local boxSpeed = CreateBox(Col3, "SPEEDHACK", "🏃")
     CreateStatus(boxSpeed, "Activar", false, function(v) SHon = v end)
     CreateSlider(boxSpeed, "Velocidad", 16, 500, 100, function(v) SHv = v end)
-
-    local boxVoid = CreateBox(Col3, "ANTI-VOID", "🌌")
-    CreateStatus(boxVoid, "Activar Anti-Void", false, function(v)
-        if v then StartAntiVoid() else StopAntiVoid() end
-    end)
-    CreateSlider(boxVoid, "Umbral Y", -500, -50, -100, function(v) AntiVoidYThreshold = v end)
 
     local boxFuga = CreateBox(Col3, "FUGA", "🚀")
     CreateButton(boxFuga, "🚀 Ejecutar Fuga", C.Gold, function()
@@ -1047,7 +1073,7 @@ RS.RenderStepped:Connect(function()
         local hum = c:FindFirstChildOfClass("Humanoid")
         if not hum then return end
         pcall(function()
-            if not V3 then hum.PlatformStand = false end
+            if not V3 and not MapOrbitOn then hum.PlatformStand = false end
             hum.Sit = false
             hum.AutoRotate = true
             hum.WalkSpeed = math.max(hum.WalkSpeed, 16)
@@ -1167,9 +1193,6 @@ FlyBtn.MouseButton1Click:Connect(function()
     if flyWasDragged() then return end
     if V3 then
         StopFlyInternal()
-        FlyBtn.Text = "✈ FLY: OFF"
-        FlyBtn.BackgroundColor3 = C.BG
-        FlyBtn.TextColor3 = C.Gold
     else
         StartFlyInternal()
         FlyBtn.Text = "✈ FLY: ON"
@@ -1214,10 +1237,8 @@ FugaBtn.MouseButton1Click:Connect(function()
 end)
 
 ----------------------------------------------------------------
--- POPULAR + ABRIR
+-- ABRIR
 ----------------------------------------------------------------
-pcall(PopulatePlayerList)
-
 Window.Size = UDim2.new(0, 0, 0, 0)
 Window.Position = UDim2.new(0.5, 0, 0.5, 0)
 task.wait(0.05)
